@@ -270,8 +270,19 @@ async function applyDeadPaneTransition(
 
 async function nextPendingTaskIndex(runtime: TeamRuntime): Promise<number | null> {
   const root = stateRoot(runtime.cwd, runtime.teamName);
+  const transientReadRetryAttempts = 3;
+  const transientReadRetryDelayMs = 15;
+
   for (let i = 0; i < runtime.config.tasks.length; i++) {
-    const task = await readTask(root, String(i + 1));
+    const taskId = String(i + 1);
+    let task = await readTask(root, taskId);
+    if (!task) {
+      for (let attempt = 1; attempt < transientReadRetryAttempts; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, transientReadRetryDelayMs));
+        task = await readTask(root, taskId);
+        if (task) break;
+      }
+    }
     if (task?.status === 'pending') return i;
   }
   return null;
