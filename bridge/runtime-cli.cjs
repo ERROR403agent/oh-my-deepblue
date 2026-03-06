@@ -993,16 +993,19 @@ ${taskList}
 ## Task Lifecycle Protocol (CLI API)
 Use the CLI API for all task lifecycle operations. Do NOT directly edit task files.
 
-1. Read your task file at \`${taskDir}/task-{taskId}.json\`
+1. Inspect the canonical task state via CLI interop:
+   \`omc team api read-task --input "{"team_name":"${teamName}","task_id":"<id>"}" --json\`
 2. Task id format: State/CLI APIs use task_id: "<id>" (example: "1"), not "task-1"
 3. Claim a task via CLI interop:
-   \`omc team api claim-task --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"worker\\":\\"${workerName2}\\"}" --json\`
+   \`omc team api claim-task --input "{"team_name":"${teamName}","task_id":"<id>","worker":"${workerName2}"}" --json\`
 4. Do the work described in the task
 5. On completion, transition via CLI interop (use the claim_token from step 3):
-   \`omc team api transition-task-status --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"from\\":\\"in_progress\\",\\"to\\":\\"completed\\",\\"claim_token\\":\\"<claim_token from step 3>\\"}" --json\`
-6. On failure, transition to "failed" with error (use the claim_token from step 3):
-   \`omc team api transition-task-status --input "{\\"team_name\\":\\"${teamName}\\",\\"task_id\\":\\"<id>\\",\\"from\\":\\"in_progress\\",\\"to\\":\\"failed\\",\\"claim_token\\":\\"<claim_token from step 3>\\"}" --json\`
-7. Use \`omc team api release-task-claim --json\` only for rollback to pending
+   \`omc team api transition-task-status --input "{"team_name":"${teamName}","task_id":"<id>","from":"in_progress","to":"completed","claim_token":"<claim_token from step 3>"}" --json\`
+6. On failure, transition to "failed" (use the claim_token from step 3):
+   \`omc team api transition-task-status --input "{"team_name":"${teamName}","task_id":"<id>","from":"in_progress","to":"failed","claim_token":"<claim_token from step 3>"}" --json\`
+7. Use release-task-claim only for rollback/requeue to pending:
+   \`omc team api release-task-claim --input "{"team_name":"${teamName}","task_id":"<id>","claim_token":"<claim_token from step 3>","worker":"${workerName2}"}" --json\`
+
 
 ## Communication Protocol
 - **Inbox**: Read ${inboxPath} for new instructions
