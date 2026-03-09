@@ -29,6 +29,7 @@ import {
 import { readHudState, writeHudState } from "../hud/state.js";
 import { loadConfig } from "../config/loader.js";
 import { writeSkillActiveState } from "./skill-state/index.js";
+import { extractPrInfo, isPrCreateCommand, isTestCommand } from "../openclaw/native-events.js";
 import {
   ULTRAWORK_MESSAGE,
   ULTRATHINK_MESSAGE,
@@ -62,6 +63,14 @@ import type { SessionEndInput } from "./session-end/index.js";
 import type { StopContext } from "./todo-continuation/index.js";
 // Security: wrap untrusted file content to prevent prompt injection
 import { wrapUntrustedFileContent } from "../agents/prompt-helpers.js";
+import {
+  inferNativeEventsForAskUserQuestion,
+  inferNativeEventsForPostToolUse,
+  inferNativeEventsForPreToolUse,
+  inferNativeEventsForSessionEnd,
+  inferNativeEventsForSessionStart,
+  inferNativeEventsForStop,
+} from "../openclaw/bridge-events.js";
 
 const PKILL_F_FLAG_PATTERN = /\bpkill\b.*\s-f\b/;
 const PKILL_FULL_FLAG_PATTERN = /\bpkill\b.*--full\b/;
@@ -655,7 +664,7 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
 
   // Lazy-load persistent-mode and todo-continuation modules
   const { checkPersistentModes, createHookOutput, shouldSendIdleNotification, recordIdleNotificationSent } = await import("./persistent-mode/index.js");
-  const { isExplicitCancelCommand, isAuthenticationError } = await import("./todo-continuation/index.js");
+  const { isExplicitCancelCommand, isAuthenticationError, isContextLimitStop, isRateLimitStop } = await import("./todo-continuation/index.js");
 
   // Extract stop context for abort detection (supports both camelCase and snake_case)
   const stopContext: StopContext = {
@@ -689,6 +698,25 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
   const result = await checkPersistentModes(sessionId, directory, stopContext);
   const output = createHookOutput(result);
 
+  if (sessionId && result.metadata?.toolError) {
+    _openclaw.wake("retry-needed", {
+      sessionId,
+      projectPath: directory,
+      toolName: result.metadata.toolError.tool_name,
+      command: result.metadata.toolError.tool_input_preview,
+      errorSummary: result.metadata.toolError.error,
+      retryCount: result.metadata.toolError.retry_count,
+      reason: result.mode !== "none" ? result.mode : stopContext.stop_reason ?? stopContext.stopReason,
+    });
+  } else if (sessionId && (isRateLimitStop(stopContext) || isAuthenticationError(stopContext) || isContextLimitStop(stopContext))) {
+    _openclaw.wake("blocked", {
+      sessionId,
+      projectPath: directory,
+      reason: stopContext.stop_reason ?? stopContext.stopReason ?? stopContext.end_turn_reason ?? stopContext.endTurnReason,
+      errorSummary: isAuthenticationError(stopContext) ? "authentication-required" : undefined,
+    });
+  }
+
   // Skip legacy bridge.ts team enforcement if persistent-mode already
   // handled this stop event (or intentionally emitted a stop message).
   // Prevents mixed/double continuation prompts across modes.
@@ -707,6 +735,9 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
       if (!isAbort && !isContextLimit) {
         // Always wake OpenClaw on stop — cooldown only applies to user-facing notifications
         _openclaw.wake("stop", { sessionId, projectPath: directory });
+        for (const nativeEvent of inferNativeEventsForStop({ ...input, sessionId, directory }, result)) {
+          _openclaw.wake(nativeEvent.name, nativeEvent.context);
+        }
 
         // Per-session cooldown: prevent notification spam when the session idles repeatedly.
         // Uses session-scoped state so one session does not suppress another.
@@ -811,7 +842,14 @@ async function processSessionStart(input: HookInput): Promise<HookOutput> {
       }).catch(() => {})
     ).catch(() => {});
     // Wake OpenClaw gateway for session-start (non-blocking)
-    _openclaw.wake("session-start", { sessionId, projectPath: directory });
+    _openclaw.wake("session-start", {
+      sessionId,
+      projectPath: directory,
+      nativeEventName: "started",
+    });
+    for (const nativeEvent of inferNativeEventsForSessionStart({ ...input, sessionId, directory })) {
+      _openclaw.wake(nativeEvent.name, nativeEvent.context);
+    }
   }
 
   // Start reply listener daemon if configured (non-blocking, swallows errors)
@@ -1041,7 +1079,7 @@ export const _notify = {
  * never blocks hooks or surfaces errors.
  */
 export const _openclaw = {
-  wake: (event: import("../openclaw/types.js").OpenClawHookEvent, context: import("../openclaw/types.js").OpenClawContext) => {
+  wake: (event: import("../openclaw/types.js").OpenClawEventName, context: import("../openclaw/types.js").OpenClawContext) => {
     if (process.env.OMC_OPENCLAW !== "1") return;
     import("../openclaw/index.js").then(({ wakeOpenClaw }) =>
       wakeOpenClaw(event, context).catch(() => {})
@@ -1182,11 +1220,16 @@ function processPreToolUse(input: HookInput): HookOutput {
     _openclaw.wake("ask-user-question", {
       sessionId: input.sessionId,
       projectPath: directory,
+      nativeEventName: "handoff-needed",
+      reason: "user-input-required",
       question: (() => {
         const ti = input.toolInput as { questions?: Array<{ question?: string }> } | undefined;
         return ti?.questions?.map(q => q.question || "").filter(Boolean).join("; ") || "";
       })(),
     });
+    for (const nativeEvent of inferNativeEventsForAskUserQuestion({ ...input, sessionId: input.sessionId, directory })) {
+      _openclaw.wake(nativeEvent.name, nativeEvent.context);
+    }
   }
 
   // Activate skill state when Skill tool is invoked (issue #1033)
@@ -1331,11 +1374,24 @@ function processPreToolUse(input: HookInput): HookOutput {
 
   // Wake OpenClaw gateway for pre-tool-use (non-blocking, fires only for allowed tools)
   if (input.sessionId) {
+    const command = input.toolName === "Bash"
+      ? ((modifiedToolInput ?? input.toolInput) as { command?: string } | undefined)?.command
+      : undefined;
     _openclaw.wake("pre-tool-use", {
       sessionId: input.sessionId,
       projectPath: directory,
       toolName: input.toolName,
+      ...(command ? { command } : {}),
+      ...(isTestCommand(command) ? { nativeEventName: "test-started" as const } : {}),
     });
+    for (const nativeEvent of inferNativeEventsForPreToolUse({
+      ...input,
+      sessionId: input.sessionId,
+      directory,
+      toolInput: modifiedToolInput ?? input.toolInput,
+    })) {
+      _openclaw.wake(nativeEvent.name, nativeEvent.context);
+    }
   }
 
   return {
@@ -1444,11 +1500,32 @@ async function processPostToolUse(input: HookInput): Promise<HookOutput> {
 
   // Wake OpenClaw gateway for post-tool-use (non-blocking, fires for all tools)
   if (input.sessionId) {
+    const command = input.toolName === "Bash"
+      ? ((input.toolInput as { command?: string } | undefined)?.command)
+      : undefined;
+    const toolOutput = typeof input.toolOutput === "string"
+      ? input.toolOutput
+      : input.toolOutput !== undefined
+        ? JSON.stringify(input.toolOutput)
+        : undefined;
+    const prInfo = extractPrInfo(command, toolOutput);
+    const nativeEventName =
+      isTestCommand(command) ? "test-finished"
+      : (isPrCreateCommand(command) || prInfo.prNumber || prInfo.prUrl) ? "pr-created"
+      : undefined;
     _openclaw.wake("post-tool-use", {
       sessionId: input.sessionId,
       projectPath: directory,
       toolName: input.toolName,
+      ...(command ? { command } : {}),
+      ...(toolOutput ? { contextSummary: toolOutput.slice(0, 500) } : {}),
+      ...(nativeEventName ? { nativeEventName } : {}),
+      ...(prInfo.prNumber !== undefined ? { prNumber: prInfo.prNumber } : {}),
+      ...(prInfo.prUrl ? { prUrl: prInfo.prUrl } : {}),
     });
+    for (const nativeEvent of inferNativeEventsForPostToolUse({ ...input, sessionId: input.sessionId, directory })) {
+      _openclaw.wake(nativeEvent.name, nativeEvent.context);
+    }
   }
 
   if (messages.length > 0) {
@@ -1588,6 +1665,13 @@ export async function processHook(
           projectPath: sessionEndInput.cwd,
           reason: sessionEndInput.reason,
         });
+        for (const nativeEvent of inferNativeEventsForSessionEnd({
+          sessionId: sessionEndInput.session_id,
+          projectPath: sessionEndInput.cwd,
+          reason: sessionEndInput.reason,
+        })) {
+          _openclaw.wake(nativeEvent.name, nativeEvent.context);
+        }
         return result;
       }
 

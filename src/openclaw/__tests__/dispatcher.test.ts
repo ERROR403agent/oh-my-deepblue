@@ -14,6 +14,9 @@ const baseGatewayConfig: OpenClawGatewayConfig = {
 
 const basePayload: OpenClawPayload = {
   event: "session-start",
+  schema: "omc.openclaw-event",
+  schemaVersion: 1,
+  source: "omc",
   instruction: "Session started",
   timestamp: "2026-02-25T00:00:00.000Z",
   context: {},

@@ -156,6 +156,7 @@ describe("resolveGateway", () => {
     expect(result).toHaveProperty("gatewayName");
     expect(result).toHaveProperty("gateway");
     expect(result).toHaveProperty("instruction");
+    expect(result).toHaveProperty("resolvedEvent");
   });
 
   it("returns null when gateway name references non-existent gateway", () => {
@@ -225,5 +226,39 @@ describe("resolveGateway", () => {
     expect(result!.gatewayName).toBe("my-gateway");
     // gateway has no type field — backward compat with pre-command-gateway configs
     expect((result!.gateway as { type?: string }).type).toBeUndefined();
+  });
+
+  it("falls back from a native event to the generic native-event mapping", () => {
+    const configWithNative: OpenClawConfig = {
+      ...validConfig,
+      hooks: {
+        "native-event": {
+          gateway: "my-gateway",
+          instruction: "Native {{event}}",
+          enabled: true,
+        },
+      },
+    };
+
+    const result = resolveGateway(configWithNative, "test-failed");
+    expect(result).not.toBeNull();
+    expect(result!.resolvedEvent).toBe("native-event");
+  });
+
+  it("falls back from a native event to the closest legacy hook mapping", () => {
+    const configWithEnabledSessionEnd: OpenClawConfig = {
+      ...validConfig,
+      hooks: {
+        ...validConfig.hooks,
+        "session-end": {
+          gateway: "my-gateway",
+          instruction: "Session ended",
+          enabled: true,
+        },
+      },
+    };
+    const result = resolveGateway(configWithEnabledSessionEnd, "finished");
+    expect(result).not.toBeNull();
+    expect(result!.resolvedEvent).toBe("session-end");
   });
 });

@@ -323,6 +323,8 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
 Includes **33 canonical skills + 1 deprecated alias** (`psm`).
 
+For the normalized clawhip/OpenClaw native event schema, see [docs/OPENCLAW_NATIVE_EVENTS.md](./OPENCLAW_NATIVE_EVENTS.md).
+
 | Skill                     | Description                                                      | Manual Command                              |
 | ------------------------- | ---------------------------------------------------------------- | ------------------------------------------- |
 | `ask-codex`               | Ask Codex via `omc ask codex` and store an ask artifact          | `/oh-my-claudecode:ask-codex`               |

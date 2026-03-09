@@ -116,6 +116,37 @@ function writeErrorState(stateDir, toolName, toolInputPreview, error, retryCount
   } catch {}
 }
 
+async function emitNativeEvent(data, toolName, command, error, retryCount, directory) {
+  if (process.env.OMC_OPENCLAW !== '1') return;
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  if (!pluginRoot) return;
+
+  try {
+    const { inferNativeEventsForToolFailure } = await import(
+      pathToFileURL(join(pluginRoot, 'dist', 'openclaw', 'bridge-events.js')).href
+    );
+    const { wakeOpenClaw } = await import(
+      pathToFileURL(join(pluginRoot, 'dist', 'openclaw', 'index.js')).href
+    );
+
+    const events = inferNativeEventsForToolFailure({
+      sessionId: data.session_id || data.sessionId || data.sessionid || undefined,
+      directory,
+      toolName,
+      command,
+      error,
+      retryCount,
+      prompt: data.prompt || data.message || undefined,
+    });
+
+    for (const event of events) {
+      await wakeOpenClaw(event.name, event.context);
+    }
+  } catch {
+    // best-effort only
+  }
+}
+
 async function main() {
   try {
     const input = await readStdin();
@@ -154,6 +185,8 @@ async function main() {
 
     // Write error state
     writeErrorState(stateDir, toolName, inputPreview, error, retryCount);
+    const command = typeof toolInput?.command === 'string' ? toolInput.command : inputPreview;
+    await emitNativeEvent(data, toolName, command, truncate(error, MAX_ERROR_LENGTH), retryCount, directory);
 
     // Inject continuation guidance so the model analyzes the error instead of stopping.
     // Without this, PostToolUseFailure returns silently and the model may end its turn.

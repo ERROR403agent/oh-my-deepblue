@@ -9,7 +9,14 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { getClaudeConfigDir } from "../utils/paths.js";
-import type { OpenClawConfig, OpenClawHookEvent, OpenClawGatewayConfig, OpenClawCommandGatewayConfig } from "./types.js";
+import type {
+  OpenClawConfig,
+  OpenClawEventName,
+  OpenClawGatewayConfig,
+  OpenClawCommandGatewayConfig,
+  OpenClawHookEvent,
+} from "./types.js";
+import { getNativeEventFallback, isOpenClawNativeEventName } from "./native-events.js";
 
 const CONFIG_FILE = process.env.OMC_OPENCLAW_CONFIG
   || join(getClaudeConfigDir(), "omc_config.openclaw.json");
@@ -63,9 +70,12 @@ export function getOpenClawConfig(): OpenClawConfig | null {
  */
 export function resolveGateway(
   config: OpenClawConfig,
-  event: OpenClawHookEvent,
-): { gatewayName: string; gateway: OpenClawGatewayConfig; instruction: string } | null {
-  const mapping = config.hooks[event];
+  event: OpenClawEventName,
+): { gatewayName: string; gateway: OpenClawGatewayConfig; instruction: string; resolvedEvent: OpenClawEventName } | null {
+  const mapping =
+    config.hooks[event]
+    ?? (isOpenClawNativeEventName(event) ? config.hooks["native-event"] : undefined)
+    ?? (isOpenClawNativeEventName(event) ? config.hooks[getNativeEventFallback(event) as OpenClawHookEvent] : undefined);
   if (!mapping || !mapping.enabled) {
     return null;
   }
@@ -82,7 +92,16 @@ export function resolveGateway(
     if (!("url" in gateway) || !gateway.url) return null;
   }
 
-  return { gatewayName: mapping.gateway, gateway, instruction: mapping.instruction };
+  let resolvedEvent: OpenClawEventName = event;
+  if (!config.hooks[event]?.enabled && isOpenClawNativeEventName(event)) {
+    if (config.hooks["native-event"]?.enabled) {
+      resolvedEvent = "native-event";
+    } else {
+      resolvedEvent = getNativeEventFallback(event);
+    }
+  }
+
+  return { gatewayName: mapping.gateway, gateway, instruction: mapping.instruction, resolvedEvent };
 }
 
 /**

@@ -18,6 +18,38 @@ vi.mock("../dispatcher.js", () => ({
   }),
 }));
 
+vi.mock("../native-events.js", () => ({
+  buildNativeEvent: vi.fn((name: string, context: Record<string, unknown>, emittedAt: string, legacyEvent?: string) => ({
+    schema: "omc.native-event",
+    version: 1,
+    name,
+    emittedAt,
+    dedupeKey: "dedupe-key",
+    legacyEvent,
+    session: { id: context.sessionId, name: context.sessionName, tmuxSession: context.tmuxSession },
+    repo: {
+      projectPath: context.projectPath,
+      projectName: context.projectPath ? String(context.projectPath).split("/").pop() : undefined,
+      repoRoot: context.repoRoot,
+      worktreePath: context.worktreePath,
+      branch: context.branch,
+      issueNumber: context.issueNumber,
+      prNumber: context.prNumber,
+      prUrl: context.prUrl,
+    },
+    ...(context.toolName || context.command ? { tool: { name: context.toolName, command: context.command } } : {}),
+    ...(context.errorSummary || context.retryCount !== undefined
+      ? { error: { summary: context.errorSummary, retryCount: context.retryCount } }
+      : {}),
+    ...(context.reason ? { reason: context.reason } : {}),
+  })),
+  isOpenClawNativeEventName: vi.fn((event: string) => [
+    "started", "blocked", "finished", "failed", "retry-needed",
+    "pr-created", "test-started", "test-finished", "test-failed", "handoff-needed",
+  ].includes(event)),
+  shouldEmitNativeEvent: vi.fn(() => true),
+}));
+
 import { wakeOpenClaw } from "../index.js";
 import { getOpenClawConfig, resolveGateway } from "../config.js";
 import { wakeGateway, wakeCommandGateway } from "../dispatcher.js";
@@ -44,6 +76,7 @@ const mockResolvedGateway = {
   gatewayName: "my-gateway",
   gateway: { url: "https://example.com/wake", method: "POST" as const },
   instruction: "Session started for {{projectName}}",
+  resolvedEvent: "session-start" as const,
 };
 
 describe("wakeOpenClaw", () => {
@@ -159,6 +192,24 @@ describe("wakeOpenClaw", () => {
     expect(Object.keys(payloadContext)).toEqual(["sessionId"]);
   });
 
+  it("adds a nativeEvent envelope while preserving the legacy event field", async () => {
+    await wakeOpenClaw("session-start", {
+      sessionId: "sid-1",
+      projectPath: "/home/user/project",
+      nativeEventName: "started",
+      branch: "feat/native",
+    });
+
+    const payload = vi.mocked(wakeGateway).mock.calls[0][2];
+    expect(payload.event).toBe("session-start");
+    expect(payload.nativeEvent).toMatchObject({
+      name: "started",
+      legacyEvent: "session-start",
+    });
+    expect(payload.schema).toBe("omc.openclaw-event");
+    expect(payload.schemaVersion).toBe(1);
+  });
+
   it("debug logging fires when OMC_OPENCLAW_DEBUG=1", async () => {
     vi.stubEnv("OMC_OPENCLAW_DEBUG", "1");
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -231,6 +282,7 @@ describe("wakeOpenClaw", () => {
       gatewayName: "cmd-gw",
       gateway: commandGateway,
       instruction: "hello",
+      resolvedEvent: "session-start",
     });
     vi.mocked(wakeCommandGateway).mockResolvedValue({ gateway: "cmd-gw", success: true });
 
@@ -255,6 +307,7 @@ describe("wakeOpenClaw", () => {
       gatewayName: "cmd-gw",
       gateway: { type: "command" as const, command: "echo test" },
       instruction: "test",
+      resolvedEvent: "session-start",
     });
     vi.mocked(wakeCommandGateway).mockRejectedValue(new Error("Command exploded"));
 
@@ -268,6 +321,7 @@ describe("wakeOpenClaw", () => {
       gatewayName: "cmd-gw",
       gateway: commandGateway,
       instruction: "Session started for {{projectName}}",
+      resolvedEvent: "session-start",
     });
     vi.mocked(wakeCommandGateway).mockResolvedValue({ gateway: "cmd-gw", success: true });
 
@@ -359,6 +413,7 @@ describe("reply channel context", () => {
       gatewayName: "cmd-gw",
       gateway: commandGateway,
       instruction: "test",
+      resolvedEvent: "session-start",
     });
     vi.mocked(wakeCommandGateway).mockResolvedValue({ gateway: "cmd-gw", success: true });
 

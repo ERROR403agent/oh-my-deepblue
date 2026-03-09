@@ -5,7 +5,7 @@
  * Each hook event can be mapped to a gateway with a pre-defined instruction.
  */
 
-/** Hook events that can trigger OpenClaw gateway calls */
+/** Legacy hook events that can trigger OpenClaw gateway calls */
 export type OpenClawHookEvent =
   | "session-start"
   | "session-end"
@@ -14,6 +14,28 @@ export type OpenClawHookEvent =
   | "stop"
   | "keyword-detector"
   | "ask-user-question";
+
+/** Native clawhip-friendly OMC event names */
+export type OpenClawNativeEventName =
+  | "started"
+  | "blocked"
+  | "finished"
+  | "failed"
+  | "retry-needed"
+  | "pr-created"
+  | "test-started"
+  | "test-finished"
+  | "test-failed"
+  | "handoff-needed";
+
+/** Generic mapping key for any native event */
+export type OpenClawNativeEventMapping = "native-event";
+
+/** Any event name accepted by OpenClaw routing/config */
+export type OpenClawEventName =
+  | OpenClawHookEvent
+  | OpenClawNativeEventName
+  | OpenClawNativeEventMapping;
 
 /** HTTP gateway configuration (default when type is absent or "http") */
 export interface OpenClawHttpGatewayConfig {
@@ -59,24 +81,94 @@ export interface OpenClawConfig {
   enabled: boolean;
   /** Named gateway endpoints */
   gateways: Record<string, OpenClawGatewayConfig>;
-  /** Hook-event to gateway+instruction mappings */
-  hooks: Partial<Record<OpenClawHookEvent, OpenClawHookMapping>>;
+  /** Event-to-gateway+instruction mappings (legacy key name retained for compat) */
+  hooks: Partial<Record<OpenClawEventName, OpenClawHookMapping>>;
+}
+
+export interface OpenClawNativeSessionContext {
+  id?: string;
+  name?: string;
+  tmuxSession?: string;
+}
+
+export interface OpenClawNativeRepoContext {
+  projectPath?: string;
+  projectName?: string;
+  repoRoot?: string;
+  worktreePath?: string;
+  branch?: string;
+  issueNumber?: number;
+  prNumber?: number;
+  prUrl?: string;
+}
+
+export interface OpenClawNativeToolContext {
+  name?: string;
+  command?: string;
+}
+
+export interface OpenClawNativeErrorContext {
+  summary?: string;
+  retryCount?: number;
+}
+
+/** Versioned native event contract for clawhip/OpenClaw consumers */
+export interface OpenClawNativeEvent {
+  schema: "omc.native-event";
+  version: 1;
+  name: OpenClawNativeEventName;
+  emittedAt: string;
+  dedupeKey: string;
+  legacyEvent?: OpenClawHookEvent;
+  session: OpenClawNativeSessionContext;
+  repo: OpenClawNativeRepoContext;
+  tool?: OpenClawNativeToolContext;
+  error?: OpenClawNativeErrorContext;
+  reason?: string;
 }
 
 /** Payload sent to an OpenClaw gateway */
 export interface OpenClawPayload {
   /** The hook event that triggered this call */
-  event: OpenClawHookEvent;
+  event: OpenClawEventName;
+  /** Stable top-level envelope marker */
+  schema: "omc.openclaw-event";
+  /** Stable top-level envelope version */
+  schemaVersion: 1;
+  /** Source system */
+  source: "omc";
   /** Interpolated instruction text */
   instruction: string;
   /** ISO timestamp */
   timestamp: string;
+  /** Normalized native event envelope for clawhip-style routing */
+  nativeEvent?: OpenClawNativeEvent;
   /** Session identifier (if available) */
   sessionId?: string;
   /** Project directory path */
   projectPath?: string;
   /** Project basename */
   projectName?: string;
+  /** Stable session name when available */
+  sessionName?: string;
+  /** Stable repo root when available */
+  repoRoot?: string;
+  /** Stable worktree path when available */
+  worktreePath?: string;
+  /** Current branch when available */
+  branch?: string;
+  /** Parsed issue number when available */
+  issueNumber?: number;
+  /** Parsed PR number when available */
+  prNumber?: number;
+  /** Parsed PR URL when available */
+  prUrl?: string;
+  /** Command context when available */
+  command?: string;
+  /** Error summary when available */
+  errorSummary?: string;
+  /** Retry count when available */
+  retryCount?: number;
   /** Tmux session name (if running inside tmux) */
   tmuxSession?: string;
   /** Recent tmux pane output (for stop/session-end events) */
@@ -99,13 +191,24 @@ export interface OpenClawPayload {
  */
 export interface OpenClawContext {
   sessionId?: string;
+  sessionName?: string;
   projectPath?: string;
+  repoRoot?: string;
+  worktreePath?: string;
+  branch?: string;
+  issueNumber?: number;
+  prNumber?: number;
+  prUrl?: string;
   tmuxSession?: string;
   toolName?: string;
+  command?: string;
   prompt?: string;
   contextSummary?: string;
   reason?: string;
   question?: string;
+  errorSummary?: string;
+  retryCount?: number;
+  nativeEventName?: OpenClawNativeEventName;
   /** Recent tmux pane output (captured automatically for stop/session-end events) */
   tmuxTail?: string;
   /** Reply channel name from OPENCLAW_REPLY_CHANNEL env var */
