@@ -482,6 +482,9 @@ async function processPersistentMode(input) {
         toolName: input.toolName,
         tool_input: input.tool_input,
         toolInput: input.toolInput,
+        reason: input.reason,
+        transcript_path: input.transcript_path,
+        transcriptPath: input.transcriptPath,
     };
     const result = await checkPersistentModes(sessionId, directory, stopContext);
     const output = createHookOutput(result);

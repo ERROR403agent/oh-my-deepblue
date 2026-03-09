@@ -226,6 +226,7 @@ export function recordIdleNotificationSent(stateDir, sessionId) {
 }
 /** Max bytes to read from the tail of a transcript for architect approval detection. */
 const TRANSCRIPT_TAIL_BYTES = 32 * 1024; // 32 KB
+const CRITICAL_CONTEXT_STOP_PERCENT = 95;
 /**
  * Read the tail of a potentially large transcript file.
  * Architect approval/rejection markers appear near the end of the conversation,
@@ -246,6 +247,37 @@ function readTranscriptTail(transcriptPath) {
     finally {
         closeSync(fd);
     }
+}
+function estimateTranscriptContextPercent(transcriptPath) {
+    if (!transcriptPath || !existsSync(transcriptPath)) {
+        return 0;
+    }
+    try {
+        const content = readTranscriptTail(transcriptPath);
+        const windowMatches = [...content.matchAll(/"context_window"\s{0,5}:\s{0,5}(\d+)/g)];
+        const inputMatches = [...content.matchAll(/"input_tokens"\s{0,5}:\s{0,5}(\d+)/g)];
+        const lastWindow = windowMatches.at(-1)?.[1];
+        const lastInput = inputMatches.at(-1)?.[1];
+        if (!lastWindow || !lastInput) {
+            return 0;
+        }
+        const contextWindow = parseInt(lastWindow, 10);
+        const inputTokens = parseInt(lastInput, 10);
+        if (!Number.isFinite(contextWindow) || contextWindow <= 0 || !Number.isFinite(inputTokens)) {
+            return 0;
+        }
+        return Math.round((inputTokens / contextWindow) * 100);
+    }
+    catch {
+        return 0;
+    }
+}
+function isCriticalContextStop(stopContext) {
+    if (isContextLimitStop(stopContext)) {
+        return true;
+    }
+    const transcriptPath = stopContext?.transcript_path ?? stopContext?.transcriptPath;
+    return estimateTranscriptContextPercent(transcriptPath) >= CRITICAL_CONTEXT_STOP_PERCENT;
 }
 /**
  * Check for architect approval in session transcript
@@ -816,10 +848,10 @@ ${TODO_CONTINUATION_PROMPT}
 export async function checkPersistentModes(sessionId, directory, stopContext // NEW: from todo-continuation types
 ) {
     const workingDir = resolveToWorktreeRoot(directory);
-    // CRITICAL: Never block context-limit stops.
-    // Blocking these causes a deadlock where Claude Code cannot compact.
+    // CRITICAL: Never block context-limit/critical-context stops.
+    // Blocking these causes a deadlock where Claude Code cannot compact or exit.
     // See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/213
-    if (isContextLimitStop(stopContext)) {
+    if (isCriticalContextStop(stopContext)) {
         return {
             shouldBlock: false,
             message: '',

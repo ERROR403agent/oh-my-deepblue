@@ -42,6 +42,17 @@ import {
 } from '../hooks/ralph/index.js';
 import { processHook, type HookInput } from '../hooks/bridge.js';
 
+function writeTranscriptWithContext(filePath: string, contextWindow: number, inputTokens: number): void {
+  writeFileSync(
+    filePath,
+    `${JSON.stringify({
+      usage: { context_window: contextWindow, input_tokens: inputTokens },
+      context_window: contextWindow,
+      input_tokens: inputTokens,
+    })}\n`,
+  );
+}
+
 describe('Keyword Detector', () => {
   describe('extractPromptText', () => {
     it('should extract text from text parts', () => {
@@ -753,6 +764,34 @@ describe('Team staged workflow integration', () => {
 
     expect(result.continue).toBe(true);
     expect(result.message || '').not.toContain('[TEAM MODE CONTINUATION]');
+  });
+
+  it('bypasses autopilot continuation when transcript context is critically exhausted', async () => {
+    const transcriptPath = join(testDir, 'transcript.jsonl');
+    writeFileSync(
+      join(testDir, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'),
+      JSON.stringify({
+        active: true,
+        phase: 'execution',
+        session_id: sessionId,
+        iteration: 2,
+        max_iterations: 20,
+        reinforcement_count: 0,
+        last_checked_at: new Date().toISOString(),
+        started_at: new Date().toISOString(),
+      })
+    );
+    writeTranscriptWithContext(transcriptPath, 1000, 960);
+
+    const result = await processHook('persistent-mode', {
+      sessionId,
+      directory: testDir,
+      transcript_path: transcriptPath,
+      stopReason: 'end_turn',
+    } as HookInput);
+
+    expect(result.continue).toBe(true);
+    expect(result.message).toBeUndefined();
   });
 });
 

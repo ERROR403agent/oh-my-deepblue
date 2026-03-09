@@ -684,6 +684,13 @@ async function processPersistentMode(input: HookInput): Promise<HookOutput> {
     toolName: input.toolName,
     tool_input: (input as Record<string, unknown>).tool_input,
     toolInput: input.toolInput,
+    reason: (input as Record<string, unknown>).reason as string | undefined,
+    transcript_path: (input as Record<string, unknown>).transcript_path as
+      | string
+      | undefined,
+    transcriptPath: (input as Record<string, unknown>).transcriptPath as
+      | string
+      | undefined,
   };
 
   const result = await checkPersistentModes(sessionId, directory, stopContext);
