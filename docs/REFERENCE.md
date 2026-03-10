@@ -8,7 +8,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 
 - [Installation](#installation)
 - [Configuration](#configuration)
-- [CLI Commands: ask/team](#cli-commands-askteam)
+- [CLI Commands: ask/team/session](#cli-commands-askteamsession)
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated)
 - [Agents (28 Total)](#agents-28-total)
 - [Skills (34 Total)](#skills-34-total)
@@ -190,7 +190,7 @@ Tag behavior:
 
 ---
 
-## CLI Commands: ask/team
+## CLI Commands: ask/team/session
 
 ### `omc ask`
 
@@ -217,6 +217,19 @@ omc team api claim-task --input '{"team_name":"auth-review","task_id":"1","worke
 ```
 
 Supported entrypoints: direct start (`omc team [N:agent] "<task>"`), `status`, `shutdown`, and `api`.
+
+### `omc session search`
+
+```bash
+omc session search "team leader stale"
+omc session search notify-hook --since 7d
+omc session search provider-routing --project all --json
+```
+
+- Defaults to the current project/worktree scope
+- Use `--project all` to search across all local Claude project transcripts
+- Supports `--limit`, `--session`, `--since`, `--context`, `--case-sensitive`, and `--json`
+- MCP/tool surface: `session_search` returns structured JSON for agents and automations
 
 ---
 
@@ -643,6 +656,7 @@ For complete documentation, see **[Performance Monitoring Guide](./PERFORMANCE-M
 | **Agent Observatory**   | Real-time agent status, efficiency, bottlenecks | HUD / API                            |
 | **Session-End Summaries** | Persisted per-session summaries and callback payloads | `.omc/sessions/*.json`, `session-end` |
 | **Session Replay**      | Event timeline for post-session analysis        | `.omc/state/agent-replay-*.jsonl`    |
+| **Session Search**      | Search prior local transcript/session artifacts  | `omc session search`, `session_search` |
 | **Intervention System** | Auto-detection of stale agents, cost overruns   | Automatic                            |
 
 ### CLI Commands
