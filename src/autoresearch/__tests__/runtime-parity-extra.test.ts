@@ -84,6 +84,27 @@ describe('autoresearch runtime parity extras', () => {
     }
   });
 
+
+  it('fresh prepare tolerates bootstrap dirt even when the worktree path is not normalized', async () => {
+    const repo = await initRepo();
+    try {
+      const contract = await makeContract(repo);
+      const worktreeRoot = `${repo.split('/').pop()}.omc-worktrees`;
+      const worktreePath = `${repo}/../${worktreeRoot}/autoresearch-missions-demo-20260314t021500z`;
+      execFileSync('git', ['worktree', 'add', '-b', 'autoresearch/missions-demo/20260314t021500z', worktreePath, 'HEAD'], {
+        cwd: repo,
+        stdio: 'ignore',
+      });
+      const worktreeContract = await materializeAutoresearchMissionToWorktree(contract, worktreePath);
+
+      await expect(
+        prepareAutoresearchRuntime(worktreeContract, repo, worktreePath, { runTag: '20260314T021500Z' }),
+      ).resolves.toMatchObject({ worktreePath });
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
   it('rejects concurrent fresh runs via the repo-root active-run lock', async () => {
     const repo = await initRepo();
     try {
