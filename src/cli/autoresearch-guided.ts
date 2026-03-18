@@ -5,8 +5,8 @@ import { join, relative, resolve, sep } from 'path';
 import { createInterface } from 'readline/promises';
 import { type AutoresearchKeepPolicy, parseSandboxContract, slugifyMissionName } from '../autoresearch/contracts.js';
 import {
-  buildMissionContent as intakeBuildMissionContent,
-  buildSandboxContent as intakeBuildSandboxContent,
+  buildMissionContent,
+  buildSandboxContent,
   type AutoresearchDeepInterviewResult,
   type AutoresearchSeedInputs,
   isLaunchReadyEvaluatorCommand,
@@ -27,14 +27,13 @@ export interface InitAutoresearchResult {
   slug: string;
 }
 
-export interface GuidedAutoresearchSetupDeps {
-  createPromptInterface?: typeof createInterface;
+export interface AutoresearchQuestionIO {
+  question(prompt: string): Promise<string>;
+  close(): void;
 }
 
-export interface AutoresearchQuestionIO { question(prompt: string): Promise<string>; close(): void }
-
-function createQuestionIO(makeInterface: typeof createInterface = createInterface): AutoresearchQuestionIO {
-  const rl = makeInterface({ input: process.stdin, output: process.stdout });
+function createQuestionIO(): AutoresearchQuestionIO {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
   return {
     question(prompt: string) {
       return rl.question(prompt);
@@ -56,8 +55,12 @@ async function promptAction(io: AutoresearchQuestionIO, launchReady: boolean): P
   if (!answer) {
     return launchReady ? 'launch' : 'refine';
   }
-  if (answer === 'launch') return 'launch';
-  if (answer === 'refine further' || answer === 'refine' || answer === 'r') return 'refine';
+  if (answer === 'launch') {
+    return 'launch';
+  }
+  if (answer === 'refine further' || answer === 'refine' || answer === 'r') {
+    return 'refine';
+  }
   throw new Error('Please choose either "launch" or "refine further".');
 }
 
@@ -74,24 +77,78 @@ export async function materializeAutoresearchDeepInterviewResult(
   return initAutoresearchMission(result.compileTarget);
 }
 
-function buildMissionContent(topic: string): string {
-  return `# Mission
+export async function initAutoresearchMission(opts: InitAutoresearchOptions): Promise<InitAutoresearchResult> {
+  const missionsRoot = join(opts.repoRoot, 'missions');
+  const missionDir = join(missionsRoot, opts.slug);
 
-${topic}
-`;
+  const rel = relative(missionsRoot, missionDir);
+  if (!rel || rel === '..' || rel.startsWith(`..${sep}`)) {
+    throw new Error('Invalid slug: resolves outside missions/ directory.');
+  }
+
+  if (existsSync(missionDir)) {
+    throw new Error(`Mission directory already exists: ${missionDir}`);
+  }
+
+  await mkdir(missionDir, { recursive: true });
+
+  const missionContent = buildMissionContent(opts.topic);
+  const sandboxContent = buildSandboxContent(opts.evaluatorCommand, opts.keepPolicy);
+  parseSandboxContract(sandboxContent);
+
+  await writeFile(join(missionDir, 'mission.md'), missionContent, 'utf-8');
+  await writeFile(join(missionDir, 'sandbox.md'), sandboxContent, 'utf-8');
+
+  return { missionDir, slug: opts.slug };
 }
 
-function buildSandboxContent(evaluatorCommand: string, keepPolicy?: AutoresearchKeepPolicy): string {
-  return buildSandboxContentImported(evaluatorCommand, keepPolicy);
+export function parseInitArgs(args: readonly string[]): Partial<InitAutoresearchOptions> {
+  const result: Partial<InitAutoresearchOptions> = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    const next = args[i + 1];
+    if ((arg === '--topic') && next) {
+      result.topic = next;
+      i++;
+    } else if ((arg === '--evaluator') && next) {
+      result.evaluatorCommand = next;
+      i++;
+    } else if ((arg === '--keep-policy') && next) {
+      const normalized = next.trim().toLowerCase();
+      if (normalized !== 'pass_only' && normalized !== 'score_improvement') {
+        throw new Error('--keep-policy must be one of: score_improvement, pass_only');
+      }
+      result.keepPolicy = normalized;
+      i++;
+    } else if ((arg === '--slug') && next) {
+      result.slug = slugifyMissionName(next);
+      i++;
+    } else if (arg.startsWith('--topic=')) {
+      result.topic = arg.slice('--topic='.length);
+    } else if (arg.startsWith('--evaluator=')) {
+      result.evaluatorCommand = arg.slice('--evaluator='.length);
+    } else if (arg.startsWith('--keep-policy=')) {
+      const normalized = arg.slice('--keep-policy='.length).trim().toLowerCase();
+      if (normalized !== 'pass_only' && normalized !== 'score_improvement') {
+        throw new Error('--keep-policy must be one of: score_improvement, pass_only');
+      }
+      result.keepPolicy = normalized;
+    } else if (arg.startsWith('--slug=')) {
+      result.slug = slugifyMissionName(arg.slice('--slug='.length));
+    } else if (arg.startsWith('--')) {
+      throw new Error(`Unknown init flag: ${arg.split('=')[0]}`);
+    }
+  }
+  return result;
 }
 
-export async function guidedAutoresearchSetup(
+export async function runAutoresearchNoviceBridge(
   repoRoot: string,
   seedInputs: AutoresearchSeedInputs = {},
   io: AutoresearchQuestionIO = createQuestionIO(),
 ): Promise<InitAutoresearchResult> {
   if (!process.stdin.isTTY) {
-    throw new Error('Guided setup requires an interactive terminal. Use --mission, --sandbox, --keep-policy, and --slug flags for non-interactive use.');
+    throw new Error('Guided setup requires an interactive terminal. Use <mission-dir> or init --topic/--evaluator/--keep-policy/--slug for non-interactive use.');
   }
 
   let topic = seedInputs.topic?.trim() || '';
@@ -106,21 +163,17 @@ export async function guidedAutoresearchSetup(
         throw new Error('Research topic is required.');
       }
 
-      const evaluatorIntent = await promptWithDefault(io, '
-How should OMC judge success? Describe it in plain language', topic);
+      const evaluatorIntent = await promptWithDefault(io, '\nHow should OMC judge success? Describe it in plain language', topic);
       evaluatorCommand = await promptWithDefault(
         io,
-        '
-Evaluator command (leave placeholder to refine further; must output {pass:boolean, score?:number} JSON before launch)',
+        '\nEvaluator command (leave placeholder to refine further; must output {pass:boolean, score?:number} JSON before launch)',
         evaluatorCommand || `TODO replace with evaluator command for: ${evaluatorIntent}`,
       );
 
-      const keepPolicyInput = await promptWithDefault(io, '
-Keep policy [score_improvement/pass_only]', keepPolicy);
+      const keepPolicyInput = await promptWithDefault(io, '\nKeep policy [score_improvement/pass_only]', keepPolicy);
       keepPolicy = keepPolicyInput.trim().toLowerCase() === 'pass_only' ? 'pass_only' : 'score_improvement';
 
-      slug = await promptWithDefault(io, '
-Mission slug', slug || slugifyMissionName(topic));
+      slug = await promptWithDefault(io, '\nMission slug', slug || slugifyMissionName(topic));
       slug = slugifyMissionName(slug);
 
       const deepInterview = await writeAutoresearchDeepInterviewArtifacts({
@@ -132,8 +185,7 @@ Mission slug', slug || slugifyMissionName(topic));
         seedInputs,
       });
 
-      console.log(`
-Draft saved: ${deepInterview.draftArtifactPath}`);
+      console.log(`\nDraft saved: ${deepInterview.draftArtifactPath}`);
       console.log(`Launch readiness: ${deepInterview.launchReady ? 'ready' : deepInterview.blockedReasons.join(' ')}`);
 
       const action = await promptAction(io, deepInterview.launchReady);
@@ -146,6 +198,14 @@ Draft saved: ${deepInterview.draftArtifactPath}`);
   } finally {
     io.close();
   }
+}
+
+export async function guidedAutoresearchSetup(
+  repoRoot: string,
+  seedInputs: AutoresearchSeedInputs = {},
+  io: AutoresearchQuestionIO = createQuestionIO(),
+): Promise<InitAutoresearchResult> {
+  return runAutoresearchNoviceBridge(repoRoot, seedInputs, io);
 }
 
 export function checkTmuxAvailable(): boolean {

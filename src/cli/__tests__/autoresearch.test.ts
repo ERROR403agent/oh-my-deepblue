@@ -12,29 +12,6 @@ vi.mock('node:child_process', async (importOriginal) => {
     ...actual,
     execFileSync: vi.fn(),
   };
-
-  it('routes seeded top-level flags through guided setup with seed args', async () => {
-    vi.mocked(execFileSync).mockReturnValue('/repo\n' as never);
-    guidedAutoresearchSetupMock.mockResolvedValue({
-      missionDir: '/repo/missions/docs-run',
-      slug: 'docs-run',
-    });
-
-    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/repo');
-
-    try {
-      await autoresearchCommand(['--topic', 'Improve docs', '--evaluator', 'node eval.js', '--slug', 'docs-run']);
-    } finally {
-      cwdSpy.mockRestore();
-    }
-
-    expect(guidedAutoresearchSetupMock).toHaveBeenCalledWith('/repo', {
-      topic: 'Improve docs',
-      evaluatorCommand: 'node eval.js',
-      slug: 'docs-run',
-    });
-    expect(spawnAutoresearchTmuxMock).toHaveBeenCalledWith('/repo/missions/docs-run', 'docs-run');
-  });
 });
 
 vi.mock('../autoresearch-guided.js', async (importOriginal) => {
@@ -150,9 +127,7 @@ describe('parseAutoresearchArgs', () => {
     expect(parsed.missionDir).toBe('/path/to/mission');
     expect(parsed.claudeArgs).toEqual(['--model', 'opus']);
   });
-
 });
-
 
 describe('autoresearchCommand', () => {
   beforeEach(() => {
@@ -178,5 +153,28 @@ describe('autoresearchCommand', () => {
 
     expect(guidedAutoresearchSetupMock).toHaveBeenCalledWith('/repo', undefined);
     expect(spawnAutoresearchTmuxMock).toHaveBeenCalledWith('/repo/missions/demo', 'demo');
+  });
+
+  it('routes seeded top-level flags through guided setup with seed args', async () => {
+    vi.mocked(execFileSync).mockReturnValue('/repo\n' as never);
+    guidedAutoresearchSetupMock.mockResolvedValue({
+      missionDir: '/repo/missions/docs-run',
+      slug: 'docs-run',
+    });
+
+    const cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/repo');
+
+    try {
+      await autoresearchCommand(['--topic', 'Improve docs', '--evaluator', 'node eval.js', '--slug', 'docs-run']);
+    } finally {
+      cwdSpy.mockRestore();
+    }
+
+    expect(guidedAutoresearchSetupMock).toHaveBeenCalledWith('/repo', {
+      topic: 'Improve docs',
+      evaluatorCommand: 'node eval.js',
+      slug: 'docs-run',
+    });
+    expect(spawnAutoresearchTmuxMock).toHaveBeenCalledWith('/repo/missions/docs-run', 'docs-run');
   });
 });
