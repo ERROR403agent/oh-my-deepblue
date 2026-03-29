@@ -250,13 +250,16 @@ export function getAgentDefinitions(options?: {
   };
 
   const resolvedConfig = options?.config ?? loadConfig();
+  const inheritModel = resolvedConfig.routing?.forceInherit
+    ? process.env.CLAUDE_MODEL || process.env.ANTHROPIC_MODEL
+    : undefined;
   const result: Record<string, { description: string; prompt: string; tools?: string[]; disallowedTools?: string[]; model?: string; defaultModel?: string }> = {};
 
   for (const [name, agentConfig] of Object.entries(agents)) {
     const override = options?.overrides?.[name];
     const configuredModel = getConfiguredAgentModel(name, resolvedConfig);
     const disallowedTools = agentConfig.disallowedTools ?? parseDisallowedTools(name);
-    const resolvedModel = override?.model ?? configuredModel ?? agentConfig.model;
+    const resolvedModel = override?.model ?? inheritModel ?? configuredModel ?? agentConfig.model;
     const resolvedDefaultModel = override?.defaultModel ?? agentConfig.defaultModel;
 
     result[name] = {
