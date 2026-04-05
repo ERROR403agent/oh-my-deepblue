@@ -91,8 +91,15 @@ const MODE_STATE_FILES = [
   'omc-teams-state.json',
 ];
 const AGENT_HEAVY_TOOLS = new Set(['Task', 'TaskCreate', 'TaskUpdate']);
-const PREFLIGHT_CONTEXT_THRESHOLD = parseInt(process.env.OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD || '72', 10);
 const QUIET_LEVEL = getQuietLevel();
+
+function getPreflightContextThreshold() {
+  const parsed = Number.parseInt(process.env.OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD || '72', 10);
+  if (Number.isNaN(parsed)) return 72;
+  return Math.max(1, Math.min(100, parsed));
+}
+
+const PREFLIGHT_CONTEXT_THRESHOLD = getPreflightContextThreshold();
 
 function getQuietLevel() {
   const parsed = Number.parseInt(process.env.OMC_QUIET || '0', 10);

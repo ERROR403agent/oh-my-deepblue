@@ -1,8 +1,12 @@
-import { execSync } from 'child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.unmock('child_process');
+vi.unmock('node:child_process');
+
+import { execFileSync } from 'child_process';
 
 const SCRIPT_PATH = join(process.cwd(), 'scripts', 'pre-tool-enforcer.mjs');
 
@@ -14,15 +18,23 @@ function runPreToolEnforcerWithEnv(
   input: Record<string, unknown>,
   env: Record<string, string> = {},
 ): Record<string, unknown> {
-  const stdout = execSync(`node "${SCRIPT_PATH}"`, {
+  const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd();
+  const homeDir = join(cwd, '.test-home');
+  const stdout = execFileSync(process.execPath, [SCRIPT_PATH], {
+    cwd,
     input: JSON.stringify(input),
     encoding: 'utf-8',
     timeout: 5000,
     env: {
       ...process.env,
+      HOME: homeDir,
+      CLAUDE_CONFIG_DIR: join(homeDir, '.claude'),
       NODE_ENV: 'test',
+      DISABLE_OMC: '',
+      OMC_SKIP_HOOKS: '',
       // Reset Bedrock/routing env vars so tests are isolated from the host environment.
       // Tests that exercise Bedrock model-routing behaviour set these explicitly via `env`.
+      OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD: '',
       OMC_ROUTING_FORCE_INHERIT: '',
       OMC_SUBAGENT_MODEL: '',
       CLAUDE_MODEL: '',
@@ -377,6 +389,65 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(String(output.reason)).toContain('Safe recovery');
   });
 
+  it('falls back to the default preflight threshold when the env value is invalid', () => {
+    const transcriptPath = join(tempDir, 'transcript.jsonl');
+    writeTranscriptWithContext(transcriptPath, 1000, 800); // 80%
+
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Task',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:executor',
+          description: 'High fan-out execution',
+        },
+        cwd: tempDir,
+        transcript_path: transcriptPath,
+        session_id: 'session-1373-invalid-threshold',
+      },
+      { OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD: 'abc' },
+    );
+
+    expect(output.decision).toBe('block');
+    expect(String(output.reason)).toContain('threshold: 72%');
+  });
+
+  it('ignores parent-process hook skip env when exercising preflight blocking', () => {
+    const previousDisableOmc = process.env.DISABLE_OMC;
+    const previousSkipHooks = process.env.OMC_SKIP_HOOKS;
+    const transcriptPath = join(tempDir, 'transcript.jsonl');
+    writeTranscriptWithContext(transcriptPath, 1000, 800); // 80%
+
+    process.env.DISABLE_OMC = '1';
+    process.env.OMC_SKIP_HOOKS = 'pre-tool-use';
+
+    try {
+      const output = runPreToolEnforcer({
+        tool_name: 'Task',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:executor',
+          description: 'High fan-out execution',
+        },
+        cwd: tempDir,
+        transcript_path: transcriptPath,
+        session_id: 'session-1373-parent-env',
+      });
+
+      expect(output.decision).toBe('block');
+    } finally {
+      if (previousDisableOmc === undefined) {
+        delete process.env.DISABLE_OMC;
+      } else {
+        process.env.DISABLE_OMC = previousDisableOmc;
+      }
+
+      if (previousSkipHooks === undefined) {
+        delete process.env.OMC_SKIP_HOOKS;
+      } else {
+        process.env.OMC_SKIP_HOOKS = previousSkipHooks;
+      }
+    }
+  });
+
   it('allows non-agent-heavy tools even when transcript context is high', () => {
     const transcriptPath = join(tempDir, 'transcript.jsonl');
     writeTranscriptWithContext(transcriptPath, 1000, 900); // 90%
@@ -391,7 +462,6 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     expect(output.continue).toBe(true);
     expect(output.decision).toBeUndefined();
   });
-
 
   it('clears awaiting confirmation from session-scoped mode state when a skill is invoked', () => {
     const sessionId = 'session-confirm';
