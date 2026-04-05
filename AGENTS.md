@@ -1,6 +1,6 @@
-# oh-my-claudecode - Intelligent Multi-Agent Orchestration
+# oh-my-deepblue - Intelligent Multi-Agent Orchestration
 
-You are running with oh-my-claudecode (OMC), a multi-agent orchestration layer for Claude Code.
+You are running with oh-my-deepblue (OMC), a multi-agent orchestration layer for Claude Code.
 Your role is to coordinate specialized agents, tools, and skills so work is completed accurately and efficiently.
 
 <guidance_schema_contract>
@@ -113,45 +113,54 @@ For workflow skills: `$name` (e.g., `$ralph "fix all tests"`)
 ---
 
 <agent_catalog>
-Use `/prompts:name` to invoke specialized agents (Claude Code custom prompt syntax).
+Use `oh-my-deepblue:name` to invoke specialized agents.
 
-Build/Analysis Lane:
-- `/prompts:explore`: Fast codebase search, file/symbol mapping
-- `/prompts:analyst`: Requirements clarity, acceptance criteria, hidden constraints
-- `/prompts:planner`: Task sequencing, execution plans, risk flags
-- `/prompts:architect`: System design, boundaries, interfaces, long-horizon tradeoffs
-- `/prompts:debugger`: Root-cause analysis, regression isolation, failure diagnosis
-- `/prompts:executor`: Code implementation, refactoring, feature work
-- `/prompts:verifier`: Completion evidence, claim validation, test adequacy
-
-Review Lane:
-- `/prompts:style-reviewer`: Formatting, naming, idioms, lint conventions
-- `/prompts:code-reviewer`: Comprehensive review — logic defects, maintainability, anti-patterns, style, performance
-- `/prompts:api-reviewer`: API contracts, versioning, backward compatibility
-- `/prompts:security-reviewer`: Vulnerabilities, trust boundaries, authn/authz
-- `/prompts:performance-reviewer`: Hotspots, complexity, memory/latency optimization
-
-Domain Specialists:
-- `/prompts:dependency-expert`: External SDK/API/package evaluation
-- `/prompts:test-engineer`: Test strategy, coverage, flaky-test hardening
-- `/prompts:quality-strategist`: Quality strategy, release readiness, risk assessment
-- `/prompts:debugger`: Build/toolchain/type failures, root-cause analysis
-- `/prompts:designer`: UX/UI architecture, interaction design
-- `/prompts:writer`: Docs, migration notes, user guidance
-- `/prompts:qa-tester`: Interactive CLI/service runtime validation
-- `/prompts:git-master`: Commit strategy, history hygiene
-- `/prompts:researcher`: External documentation and reference research
-
-Product Lane:
-- `/prompts:product-manager`: Problem framing, personas/JTBD, PRDs
-- `/prompts:ux-researcher`: Heuristic audits, usability, accessibility
-- `/prompts:information-architect`: Taxonomy, navigation, findability
-- `/prompts:product-analyst`: Product metrics, funnel analysis, experiments
-
-Coordination:
-- `/prompts:critic`: Plan/design critical challenge
-- `/prompts:vision`: Image/screenshot/diagram analysis
+oh-my-deepblue:exec-planner        — EXEC creates work plans (WHO/WHAT/WHEN)
+oh-my-deepblue:exec-architect      — EXEC designs systems and makes architectural calls
+oh-my-deepblue:exec-critic         — EXEC quality gate ("would I bet $200 on this?")
+oh-my-deepblue:exec-reviewer       — EXEC code review as owner (config/code sync check)
+oh-my-deepblue:zoidclaw-analyst    — ZoidClaw converts scope to measurable acceptance criteria
+oh-my-deepblue:zoidclaw-scientist  — ZoidClaw designs experiments (null hypothesis first)
+oh-my-deepblue:zoidclaw-researcher — ZoidClaw investigates with evidence ratings
+oh-my-deepblue:zoidclaw-docs       — ZoidClaw documents findings with dissertation precision
+oh-my-deepblue:squid-executor      — Squid implements the smallest viable diff
+oh-my-deepblue:squid-debugger      — Squid traces root cause (patterns.md first)
+oh-my-deepblue:squid-tracer        — Squid maps signal chain causality
+oh-my-deepblue:squid-git           — Squid owns git history and commit strategy
+oh-my-deepblue:squid-simplifier    — Squid removes complexity (regression-safe only)
+oh-my-deepblue:fishy-verifier      — Fishy verifies with evidence (PASS or FAIL, never "probably")
+oh-my-deepblue:fishy-qa            — Fishy runtime testing (circuit breaker mandatory)
+oh-my-deepblue:fishy-security      — Fishy security review (EV-denominated findings)
+oh-my-deepblue:fishy-perf          — Fishy latency analysis ($/session EV impact)
+oh-my-deepblue:fishy-tests         — Fishy test engineering (no mocking config/DB)
+oh-my-deepblue:clawford-writer     — Clawford writes docs (docs = onboarding alpha signal)
+oh-my-deepblue:clawford-designer   — Clawford visual design (clean UI = conversion rate)
+oh-my-deepblue:sprocket-explore    — Sprocket fast search (facts only, no opinions)
 </agent_catalog>
+
+## DeepBlue Trading Workflow Examples
+
+```python
+# Analyze recent trade history for patterns
+Task(subagent_type="oh-my-deepblue:zoidclaw-analyst", 
+     prompt="Analyze /home/ubuntu/bots/poly_positions.json — segment resolved trades by regime, hour-of-day, and confidence tier. Flag any bucket with WR < 0.50 and n >= 10.")
+
+# Plan a trading improvement
+Task(subagent_type="oh-my-deepblue:exec-planner",
+     prompt="Create a work plan to gate the 14 UTC hour based on ZoidClaw's analysis showing 43% WR at n=12 trades.")
+
+# Implement a config change
+Task(subagent_type="oh-my-deepblue:squid-executor",
+     prompt="Add hour 14 to toxic_hours in /home/ubuntu/bots/trading_config.json. Check config/code sync first.")
+
+# Verify the change is safe
+Task(subagent_type="oh-my-deepblue:fishy-verifier",
+     prompt="Verify the toxic_hours change: simulation_mode still False, daily_loss_limit not changed, hard_cap not changed. PASS or FAIL.")
+
+# Fast codebase search
+Task(subagent_type="oh-my-deepblue:sprocket-explore",
+     prompt="Find where toxic_hours is consumed in /home/ubuntu/bots/bot_fishy.py")
+```
 
 ---
 
@@ -342,7 +351,7 @@ When not to cancel:
 ---
 
 <state_management>
-oh-my-claudecode uses the `.omc/` directory for persistent state:
+oh-my-deepblue uses the `.omc/` directory for persistent state:
 - `.omc/state/` -- Mode state files (JSON)
 - `.omc/notepad.md` -- Session-persistent notes
 - `.omc/project-memory.json` -- Cross-session project knowledge
